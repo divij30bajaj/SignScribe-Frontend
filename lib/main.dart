@@ -82,39 +82,44 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(height: 60),
-            Text('SignScribe',
-                style: Theme.of(context).textTheme.headlineLarge,
-                textAlign: TextAlign.center),
-            const SizedBox(height: 24),
-            ClipOval(
-              child: SizedBox(
-                width: 180,
-                height: 180,
-                child: _controller.value.isInitialized
-                    ? AspectRatio(
-                  aspectRatio: _controller.value.aspectRatio,
-                  child: VideoPlayer(_controller),
-                )
-                    : Container(
-                  color: Theme.of(context).colorScheme.surfaceVariant,
-                  child: const Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,  // ← was 'start'
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  'SignScribe',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                  textAlign: TextAlign.center,
                 ),
-              ),
+                const SizedBox(height: 24),
+                ClipOval(
+                  child: SizedBox(
+                    width: 180,
+                    height: 180,
+                    child: _controller.value.isInitialized
+                        ? AspectRatio(
+                      aspectRatio: _controller.value.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    )
+                        : Container(
+                      color: Theme.of(context).colorScheme.surfaceVariant,
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Welcome to SignScribe',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-            Text('Welcome to SignScribe',
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: TextAlign.center),
-          ],
+          ),
         ),
-      ),
     );
   }
 }
