@@ -3,6 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>NSCameraUsageDescription</key>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>SignScribe uses speech recognition to interpret audio.</string>
+    <key>NSCameraUsageDescription</key>
     <string>SignScribe needs camera access to record sign language.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>SignScribe needs microphone access for video recording.</string>

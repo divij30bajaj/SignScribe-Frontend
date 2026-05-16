@@ -9,6 +9,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 // ── Global camera list (initialised in main) ──────────────────────────────────
 List<CameraDescription> _cameras = [];
@@ -16,13 +18,18 @@ List<CameraDescription> _cameras = [];
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _cameras = await availableCameras();
-  runApp(const SignScribeApp());
+
+  final prefs = await SharedPreferences.getInstance();
+  final savedLanguage = prefs.getString('language');
+
+  runApp(SignScribeApp(showLanguageSetup: savedLanguage == null));
 }
 
 // ── App root ──────────────────────────────────────────────────────────────────
 
 class SignScribeApp extends StatelessWidget {
-  const SignScribeApp({super.key});
+  final bool showLanguageSetup;
+  const SignScribeApp({super.key, required this.showLanguageSetup});
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +39,7 @@ class SignScribeApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const WelcomeScreen(),
+      home: WelcomeScreen(showLanguageSetup: showLanguageSetup),
     );
   }
 }
@@ -40,7 +47,8 @@ class SignScribeApp extends StatelessWidget {
 // ── Welcome screen ────────────────────────────────────────────────────────────
 
 class WelcomeScreen extends StatefulWidget {
-  const WelcomeScreen({super.key});
+  final bool showLanguageSetup;
+  const WelcomeScreen({super.key, required this.showLanguageSetup});
 
   @override
   State<WelcomeScreen> createState() => _WelcomeScreenState();
@@ -66,7 +74,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
           _controller.value.position >= _controller.value.duration) {
         if (mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
+            MaterialPageRoute(
+              builder: (_) => widget.showLanguageSetup
+                  ? const LanguageSetupScreen()   // ← first time
+                  : const HomeScreen(),           // ← returning user
+            ),
           );
         }
       }
@@ -120,6 +132,152 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             ),
           ),
         ),
+    );
+  }
+}
+
+
+// ── Language setup screen (shown only on first launch) ───────────────────────
+
+class LanguageSetupScreen extends StatefulWidget {
+  const LanguageSetupScreen({super.key});
+
+  @override
+  State<LanguageSetupScreen> createState() => _LanguageSetupScreenState();
+}
+
+class _LanguageSetupScreenState extends State<LanguageSetupScreen> {
+  String _selectedLanguage = 'English';
+  late VideoPlayerController _controller;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.asset('assets/welcome_video.mp4')
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {});
+          _controller.setLooping(true);
+          _controller.play();
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('language', _selectedLanguage);
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // ── Question ──────────────────────────────────────────────
+                Text(
+                  'Which language are you comfortable reading in?',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 32),
+
+                // ── Circular video ────────────────────────────────────────
+                ClipOval(
+                  child: SizedBox(
+                    width: 160,
+                    height: 160,
+                    child: _controller.value.isInitialized
+                        ? AspectRatio(
+                      aspectRatio: _controller.value.aspectRatio,
+                      child: VideoPlayer(_controller),
+                    )
+                        : Container(
+                      color: cs.surfaceVariant,
+                      child: const Center(
+                          child: CircularProgressIndicator()),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                // ── Dropdown ──────────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: cs.outline),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedLanguage,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'English', child: Text('English')),
+                        DropdownMenuItem(
+                            value: 'Hindi', child: Text('Hindi')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedLanguage = value);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                // ── Save button ───────────────────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                        : const Text('Save',
+                        style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -219,7 +377,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const LiveCallScreen()),
+      MaterialPageRoute(builder: (_) => const CallLanguageScreen()),
     );
   }
 
@@ -326,8 +484,101 @@ enum _LiveCallState {
   listening,   // STT active, showing "Start Signing"
 }
 
+
+class CallLanguageScreen extends StatefulWidget {
+  const CallLanguageScreen({super.key});
+
+  @override
+  State<CallLanguageScreen> createState() => _CallLanguageScreenState();
+}
+
+class _CallLanguageScreenState extends State<CallLanguageScreen> {
+  String _selectedLanguage = 'English';
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Choose your language',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 32),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: cs.outline),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedLanguage,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'English', child: Text('English')),
+                        DropdownMenuItem(
+                            value: 'Hindi', child: Text('Hindi')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedLanguage = value);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(
+                          builder: (_) => LiveCallScreen(
+                            callLanguage: _selectedLanguage,
+                          ),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Submit',
+                        style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
 class LiveCallScreen extends StatefulWidget {
-  const LiveCallScreen({super.key});
+  final String callLanguage;
+  const LiveCallScreen({super.key, required this.callLanguage});
 
   @override
   State<LiveCallScreen> createState() => _LiveCallScreenState();
@@ -337,6 +588,8 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── Camera ────────────────────────────────────────────────────────────────
   late CameraController _cam;
   bool _camReady = false;
+  late String _callLanguage;
+  OnDeviceTranslator? _translator;
 
   // ── State machine ─────────────────────────────────────────────────────────
   _LiveCallState _state = _LiveCallState.idle;
@@ -357,9 +610,72 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   @override
   void initState() {
     super.initState();
+    _callLanguage = widget.callLanguage;  // ← from CallLanguageScreen
     _initCamera();
     _initTts();
     _initStt();
+    _loadLanguage();
+    _initCallTranslator();               // ← replaces _loadLanguage()
+  }
+
+  Future<void> _loadLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final language = prefs.getString('language') ?? 'English';
+    if (mounted) setState(() => _callLanguage = language);
+
+    // Only create translator if not English
+    if (language != 'English') {
+      const mlKitLanguageMap = {
+        'Hindi':     TranslateLanguage.hindi,
+        'Tamil':     TranslateLanguage.tamil,
+        'Telugu':    TranslateLanguage.telugu,
+        'Kannada':   TranslateLanguage.kannada,
+        'Bengali':   TranslateLanguage.bengali,
+        'Marathi':   TranslateLanguage.marathi,
+        'Gujarati':  TranslateLanguage.gujarati,
+      };
+
+      final targetLanguage = mlKitLanguageMap[language];
+      if (targetLanguage != null) {
+        _translator = OnDeviceTranslator(
+          sourceLanguage: TranslateLanguage.english,
+          targetLanguage: targetLanguage,
+        );
+
+        // Download model in background if not already present
+        final modelManager = OnDeviceTranslatorModelManager();
+        final downloaded = await modelManager.isModelDownloaded(targetLanguage.bcpCode);
+        if (!downloaded) {
+          await modelManager.downloadModel(targetLanguage.bcpCode);
+        }
+      }
+    }
+  }
+
+  Future<void> _initCallTranslator() async {
+    const mlKitLanguageMap = {
+      'Hindi':     TranslateLanguage.hindi,
+      'Tamil':     TranslateLanguage.tamil,
+      'Telugu':    TranslateLanguage.telugu,
+      'Kannada':   TranslateLanguage.kannada,
+      'Bengali':   TranslateLanguage.bengali,
+      'Marathi':   TranslateLanguage.marathi,
+      'Gujarati':  TranslateLanguage.gujarati,
+    };
+
+    final targetLanguage = mlKitLanguageMap[_callLanguage];
+    if (targetLanguage != null) {
+      _translator = OnDeviceTranslator(
+        sourceLanguage: TranslateLanguage.english,
+        targetLanguage: targetLanguage,
+      );
+      final modelManager = OnDeviceTranslatorModelManager();
+      final downloaded = await modelManager.isModelDownloaded(
+          targetLanguage.bcpCode);
+      if (!downloaded) {
+        await modelManager.downloadModel(targetLanguage.bcpCode);
+      }
+    }
   }
 
   Future<void> _initCamera() async {
@@ -411,9 +727,16 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
     setState(() => _state = _LiveCallState.processing);
     try {
       final file = await _cam.stopVideoRecording();
-      final result = await _uploadVideo(File(file.path));
+      final englishResult = await _uploadVideo(File(file.path));
+
+      // Translate if call language is not English
+      String displayResult = englishResult;
+      if (_translator != null) {
+        displayResult = await _translator!.translateText(englishResult);
+      }
+
       setState(() {
-        _translation = result;
+        _translation = displayResult;
         _state = _LiveCallState.result;
       });
     } catch (e) {
@@ -449,9 +772,21 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── TTS ───────────────────────────────────────────────────────────────────
 
   Future<void> _playAloud() async {
-    if (_ttsReady && _translation != null) {
-      await _tts.speak(_translation!);
-    }
+    if (!_ttsReady || _translation == null) return;
+
+    const ttsLocaleMap = {
+      'Hindi':     'hi-IN',
+      'Tamil':     'ta-IN',
+      'Telugu':    'te-IN',
+      'Kannada':   'kn-IN',
+      'Bengali':   'bn-IN',
+      'Marathi':   'mr-IN',
+      'Gujarati':  'gu-IN',
+    };
+
+    final locale = ttsLocaleMap[_callLanguage] ?? 'en-US';
+    await _tts.setLanguage(locale);
+    await _tts.speak(_translation!);
   }
 
   // ── STT ───────────────────────────────────────────────────────────────────
@@ -465,14 +800,28 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
       _state = _LiveCallState.listening;
       _listenedText = null;
     });
+
+    const sttLocaleMap = {
+      'Hindi':     'hi-IN',
+      'Tamil':     'ta-IN',
+      'Telugu':    'te-IN',
+      'Kannada':   'kn-IN',
+      'Malayalam': 'ml-IN',
+      'Bengali':   'bn-IN',
+      'Marathi':   'mr-IN',
+      'Gujarati':  'gu-IN',
+      'Punjabi':   'pa-IN',
+    };
+
+    final locale = sttLocaleMap[_callLanguage] ?? 'en-US';
+
     await _stt.listen(
       onResult: (result) {
-        if (mounted) {
-          setState(() => _listenedText = result.recognizedWords);
-        }
+        if (mounted) setState(() => _listenedText = result.recognizedWords);
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 5),
+      localeId: locale,
       listenOptions: SpeechListenOptions(partialResults: true),
     );
   }
@@ -484,6 +833,7 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   @override
   void dispose() {
     _cam.dispose();
+    _translator?.close();
     _tts.stop();
     _stt.stop();
     super.dispose();
