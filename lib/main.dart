@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:camera/camera.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 // ── Global camera list (initialised in main) ──────────────────────────────────
 List<CameraDescription> _cameras = [];
@@ -112,7 +112,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Welcome to SignScribe',
+                  'Your personal interpreter',
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
@@ -218,10 +218,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _statusText = 'No camera available.');
       return;
     }
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const CameraStreamScreen()),
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LiveCallScreen()),
     );
-    if (result != null) await _handleResult(result);
   }
 
   Future<void> _speak() async {
@@ -302,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: _isUploading ? null : _openCamera,
-                      child: const Text('Record'),
+                      child: const Text('Start Live Call'),
                     ),
                   ),
                 ],
@@ -317,42 +316,62 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // ── Camera stream screen ──────────────────────────────────────────────────────
 
-class CameraStreamScreen extends StatefulWidget {
-  const CameraStreamScreen({super.key});
+// ── Live call screen ──────────────────────────────────────────────────────────
 
-  @override
-  State<CameraStreamScreen> createState() => _CameraStreamScreenState();
+enum _LiveCallState {
+  idle,        // showing "Start Signing" and "Listen"
+  recording,   // recording video, only "Stop" visible
+  processing,  // uploading, waiting for translation
+  result,      // showing translation + "Play Aloud" + "Listen"
+  listening,   // STT active, showing "Start Signing"
 }
 
-class _CameraStreamScreenState extends State<CameraStreamScreen> {
-  late CameraController _cam;
-  WebSocketChannel? _channel;
+class LiveCallScreen extends StatefulWidget {
+  const LiveCallScreen({super.key});
 
+  @override
+  State<LiveCallScreen> createState() => _LiveCallScreenState();
+}
+
+class _LiveCallScreenState extends State<LiveCallScreen> {
+  // ── Camera ────────────────────────────────────────────────────────────────
+  late CameraController _cam;
   bool _camReady = false;
-  bool _streaming = false;   // true while frames are being sent
-  bool _waiting = false;     // true after STOP, waiting for server response
+
+  // ── State machine ─────────────────────────────────────────────────────────
+  _LiveCallState _state = _LiveCallState.idle;
+
+  // ── Results ───────────────────────────────────────────────────────────────
+  String? _translation;   // from sign → text
+  String? _listenedText;  // from speech → text
   String? _error;
+
+  // ── TTS ───────────────────────────────────────────────────────────────────
+  final FlutterTts _tts = FlutterTts();
+  bool _ttsReady = false;
+
+  // ── STT ───────────────────────────────────────────────────────────────────
+  final SpeechToText _stt = SpeechToText();
+  bool _sttAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+    _initTts();
+    _initStt();
   }
 
   Future<void> _initCamera() async {
-    // Prefer front camera for sign language; fall back to first available
     final desc = _cameras.firstWhere(
           (c) => c.lensDirection == CameraLensDirection.front,
       orElse: () => _cameras.first,
     );
-
     _cam = CameraController(
       desc,
-      ResolutionPreset.medium,   // medium = good balance of quality vs bandwidth
-      enableAudio: false,        // we only need frames, not audio
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      ResolutionPreset.medium,
+      enableAudio: false,
     );
-
     try {
       await _cam.initialize();
       if (mounted) setState(() => _camReady = true);
@@ -361,73 +380,112 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
     }
   }
 
-  // ── Start streaming ───────────────────────────────────────────────────────
+  Future<void> _initTts() async {
+    await _tts.setLanguage('en-US');
+    await _tts.setSpeechRate(0.5);
+    if (mounted) setState(() => _ttsReady = true);
+  }
 
-  Future<void> _startStreaming() async {
-    const wsUrl = 'ws://3.109.38.123:8000/video/stream';
+  Future<void> _initStt() async {
+    _sttAvailable = await _stt.initialize();
+    if (mounted) setState(() {});
+  }
 
+  // ── Recording ─────────────────────────────────────────────────────────────
+
+  Future<void> _startSigning() async {
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      setState(() => _streaming = true);
-
-      // Send each captured frame as raw JPEG bytes
-      await _cam.startImageStream((CameraImage image) {
-        if (!_streaming) return;
-
-        // CameraImage with JPEG group gives us the bytes directly in plane[0]
-        final bytes = image.planes[0].bytes;
-        try {
-          _channel?.sink.add(bytes);
-        } catch (_) {
-          // socket closed mid-stream — stop gracefully
-          _stopStreaming();
-        }
+      await _cam.startVideoRecording();
+      setState(() {
+        _state = _LiveCallState.recording;
+        _translation = null;
+        _listenedText = null;
+        _error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = 'WebSocket error: $e');
+      setState(() => _error = 'Recording error: $e');
     }
   }
 
-  // ── Stop streaming → send STOP → wait for response ───────────────────────
-
-  Future<void> _stopStreaming() async {
-    if (!_streaming) return;
-
-    setState(() {
-      _streaming = false;
-      _waiting = true;
-    });
-
-    await _cam.stopImageStream();
-
-    // Signal the server that recording is done
-    _channel?.sink.add('STOP');
-
-    // Wait for the server's JSON response
+  Future<void> _stopSigning() async {
+    setState(() => _state = _LiveCallState.processing);
     try {
-      final response = await _channel!.stream.first
-          .timeout(const Duration(seconds: 60));
-
-      final json = jsonDecode(response as String) as Map<String, dynamic>;
-      final translation = json['translation'] as String? ?? 'No translation';
-
-      if (mounted) Navigator.of(context).pop(translation); // return to HomeScreen
+      final file = await _cam.stopVideoRecording();
+      final result = await _uploadVideo(File(file.path));
+      setState(() {
+        _translation = result;
+        _state = _LiveCallState.result;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _waiting = false;
-          _error = 'Failed to receive response: $e';
-        });
-      }
-    } finally {
-      await _channel?.sink.close();
+      setState(() {
+        _error = 'Error: $e';
+        _state = _LiveCallState.idle;
+      });
     }
+  }
+
+  // ── Upload (same as HomeScreen) ───────────────────────────────────────────
+
+  Future<String> _uploadVideo(File videoFile) async {
+    const backendUrl = 'http://3.109.38.123:8000/video/upload';
+    final request = http.MultipartRequest('POST', Uri.parse(backendUrl));
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'video',
+        videoFile.path,
+        contentType: MediaType('video', 'mp4'),
+      ),
+    );
+    final streamed = await request.send().timeout(const Duration(seconds: 120));
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw Exception('Server error: ${response.statusCode}');
+    }
+    if (response.body.isEmpty) throw Exception('Empty response');
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return json['translation'] as String? ?? 'No translation found';
+  }
+
+  // ── TTS ───────────────────────────────────────────────────────────────────
+
+  Future<void> _playAloud() async {
+    if (_ttsReady && _translation != null) {
+      await _tts.speak(_translation!);
+    }
+  }
+
+  // ── STT ───────────────────────────────────────────────────────────────────
+
+  Future<void> _startListening() async {
+    if (!_sttAvailable) {
+      setState(() => _error = 'Speech recognition not available');
+      return;
+    }
+    setState(() {
+      _state = _LiveCallState.listening;
+      _listenedText = null;
+    });
+    await _stt.listen(
+      onResult: (result) {
+        if (mounted) {
+          setState(() => _listenedText = result.recognizedWords);
+        }
+      },
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 5),
+      listenOptions: SpeechListenOptions(partialResults: true),
+    );
+  }
+
+  Future<void> _stopListening() async {
+    await _stt.stop();
   }
 
   @override
   void dispose() {
     _cam.dispose();
-    _channel?.sink.close();
+    _tts.stop();
+    _stt.stop();
     super.dispose();
   }
 
@@ -440,90 +498,260 @@ class _CameraStreamScreenState extends State<CameraStreamScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Camera preview ──────────────────────────────────────────────
-          if (_camReady) CameraPreview(_cam),
-
-          // ── Error message ───────────────────────────────────────────────
-          if (_error != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(_error!,
-                    style: const TextStyle(color: Colors.red, fontSize: 16),
-                    textAlign: TextAlign.center),
-              ),
+          // ── Translucent camera preview ────────────────────────────────
+          if (_camReady)
+            Opacity(
+              opacity: 0.15,   // almost black, slightly visible like FaceTime
+              child: CameraPreview(_cam),
             ),
 
-          // ── Waiting spinner (after STOP, before response) ───────────────
-          if (_waiting)
-            Container(
-              color: Colors.black54,
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 16),
-                    Text('Waiting for translation…',
-                        style: TextStyle(color: Colors.white, fontSize: 16)),
-                  ],
+          // ── Main content overlay ──────────────────────────────────────
+          SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Back button (hidden during recording)
+                      if (_state != _LiveCallState.recording)
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () => Navigator.of(context).pop(),
+                        )
+                      else
+                        const SizedBox(width: 48), // keep layout balanced
+
+                      // End Call — always visible
+                      _TextButton(
+                        onTap: () => Navigator.of(context).pop(),
+                        label: 'End Call',
+                        color: Colors.red,
+                        textColor: Colors.white,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
 
-          // ── Bottom controls ─────────────────────────────────────────────
-          if (!_waiting)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 48),
-                child: _streaming
-                // ── STOP button ────────────────────────────────────────
-                    ? GestureDetector(
-                  onTap: _stopStreaming,
-                  child: Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                    ),
-                    child: const Icon(Icons.stop,
-                        color: Colors.white, size: 36),
-                  ),
-                )
-                // ── START button ───────────────────────────────────────
-                    : _camReady
-                    ? GestureDetector(
-                  onTap: _startStreaming,
-                  child: Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: Colors.red, width: 6),
-                    ),
-                  ),
-                )
-                    : const CircularProgressIndicator(
-                    color: Colors.white),
-              ),
-            ),
+                const Spacer(),
 
-          // ── Back button (top-left) ──────────────────────────────────────
-          if (!_streaming && !_waiting)
+                // ── Centre content area ─────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: _buildCentreContent(),
+                ),
+
+                const Spacer(),
+
+                // ── Bottom controls ─────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 48),
+                  child: _buildControls(),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Error ─────────────────────────────────────────────────────
+          if (_error != null)
             Positioned(
-              top: 48,
-              left: 16,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.of(context).pop(),
+              bottom: 120,
+              left: 24,
+              right: 24,
+              child: Text(
+                _error!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCentreContent() {
+    switch (_state) {
+      case _LiveCallState.idle:
+        return const Text(
+          'Start signing or listen to the other person',
+          style: TextStyle(color: Colors.white70, fontSize: 16),
+          textAlign: TextAlign.center,
+        );
+
+      case _LiveCallState.recording:
+        return const Text(
+          'Recording…',
+          style: TextStyle(color: Colors.redAccent, fontSize: 18),
+          textAlign: TextAlign.center,
+        );
+
+      case _LiveCallState.processing:
+        return const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.white),
+            SizedBox(height: 16),
+            Text('Translating…',
+                style: TextStyle(color: Colors.white70, fontSize: 16)),
+          ],
+        );
+
+      case _LiveCallState.result:
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Translation card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Column(
+                children: [
+                  const Text('\u201C',
+                      style: TextStyle(color: Colors.white38, fontSize: 40)),
+                  Text(
+                    _translation ?? '',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 20, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Interpreted Sign Language',
+                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+                ],
+              ),
+            ),
+
+            // Listened text (if any)
+            if (_listenedText != null && _listenedText!.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  children: [
+                    const Text('They said:',
+                        style:
+                        TextStyle(color: Colors.white38, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Text(
+                      _listenedText!,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+
+      case _LiveCallState.listening:
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.mic, color: Colors.white, size: 48),
+            const SizedBox(height: 12),
+            Text(
+              _listenedText?.isNotEmpty == true
+                  ? _listenedText!
+                  : 'Listening…',
+              style: const TextStyle(color: Colors.white70, fontSize: 18),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        );
+    }
+  }
+
+  Widget _buildControls() {
+    switch (_state) {
+      case _LiveCallState.idle:
+      case _LiveCallState.result:
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _TextButton(
+              onTap: _startSigning,
+              label: 'Start Signing',
+              color: Colors.white,
+              textColor: Colors.black,
+            ),
+            const SizedBox(width: 16),
+            _TextButton(
+              onTap: _startListening,
+              label: 'Listen',
+              color: Colors.white24,
+              textColor: Colors.white,
+            ),
+          ],
+        );
+
+      case _LiveCallState.recording:
+        return _TextButton(
+          onTap: _stopSigning,
+          label: 'Stop',
+          color: Colors.red,
+          textColor: Colors.white,
+        );
+
+      case _LiveCallState.processing:
+        return const SizedBox.shrink();
+
+      case _LiveCallState.listening:
+        return _TextButton(
+          onTap: () async {
+            await _stopListening();
+            setState(() => _state = _LiveCallState.result);
+          },
+          label: 'Stop',
+          color: Colors.white24,
+          textColor: Colors.white,
+        );
+    }
+  }
+}
+
+class _TextButton extends StatelessWidget {
+  final VoidCallback onTap;
+  final String label;
+  final Color color;
+  final Color textColor;
+
+  const _TextButton({
+    required this.onTap,
+    required this.label,
+    required this.color,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(40),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
