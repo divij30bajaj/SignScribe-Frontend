@@ -1019,10 +1019,9 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
 
     // Request permissions explicitly before listening
     final micPermission = await Permission.microphone.request();
-    final speechPermission = await Permission.speech.request();
 
-    if (!micPermission.isGranted || !speechPermission.isGranted) {
-      setState(() => _error = 'Mic: ${micPermission.status}, Speech: ${speechPermission.status}');
+    if (!micPermission.isGranted) {
+      setState(() => _error = 'Mic permission: $micPermission');
       return;
     }
 
