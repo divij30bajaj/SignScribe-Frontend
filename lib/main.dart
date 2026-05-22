@@ -1011,32 +1011,33 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── STT ───────────────────────────────────────────────────────────────────
 
   Future<void> _startListening() async {
+    // Show _sttAvailable value visibly on screen
     if (!_sttAvailable) {
-      setState(() => _error = 'Speech recognition not available');
+      setState(() => _error = 'STT not available. Available: $_sttAvailable');
       return;
     }
+
     setState(() {
       _state = _LiveCallState.listening;
-      _listenedText = null;
+      _listenedText = 'Waiting for speech...'; // ← visible confirmation listen started
+      _error = null;
     });
-
-    const sttLocaleMap = {
-      'Hindi': 'hi-IN', 'Tamil': 'ta-IN', 'Telugu': 'te-IN',
-      'Kannada': 'kn-IN', 'Bengali': 'bn-IN', 'Marathi': 'mr-IN',
-      'Gujarati': 'gu-IN',
-    };
-
-    final locale = sttLocaleMap[_callLanguage] ?? 'en-US';
 
     await _stt.listen(
       onResult: (result) {
-        if (mounted) setState(() => _listenedText = result.recognizedWords);
+        if (mounted) setState(() => _listenedText = result.recognizedWords.isEmpty
+            ? 'No words yet...'
+            : result.recognizedWords);
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 5),
-      // localeId: locale,
       partialResults: true,
     );
+
+    // This runs after listen completes
+    if (mounted) setState(() => _listenedText = (_listenedText == 'Waiting for speech...')
+        ? 'Listen ended with no results'
+        : _listenedText);
   }
 
   Future<void> _stopListening() async {
