@@ -10,6 +10,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 // ── Global camera list (initialised in main) ──────────────────────────────────
@@ -1011,15 +1012,23 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── STT ───────────────────────────────────────────────────────────────────
 
   Future<void> _startListening() async {
-    // Show _sttAvailable value visibly on screen
     if (!_sttAvailable) {
-      setState(() => _error = 'STT not available. Available: $_sttAvailable');
+      setState(() => _error = 'STT not available');
+      return;
+    }
+
+    // Request permissions explicitly before listening
+    final micPermission = await Permission.microphone.request();
+    final speechPermission = await Permission.speech.request();
+
+    if (!micPermission.isGranted || !speechPermission.isGranted) {
+      setState(() => _error = 'Mic: ${micPermission.status}, Speech: ${speechPermission.status}');
       return;
     }
 
     setState(() {
       _state = _LiveCallState.listening;
-      _listenedText = 'Waiting for speech...'; // ← visible confirmation listen started
+      _listenedText = 'Listening...';
       _error = null;
     });
 
@@ -1033,11 +1042,6 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
       pauseFor: const Duration(seconds: 5),
       partialResults: true,
     );
-
-    // This runs after listen completes
-    if (mounted) setState(() => _listenedText = (_listenedText == 'Waiting for speech...')
-        ? 'Listen ended with no results'
-        : _listenedText);
   }
 
   Future<void> _stopListening() async {
