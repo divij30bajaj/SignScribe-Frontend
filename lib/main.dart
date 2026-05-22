@@ -1043,9 +1043,9 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         if (mounted) setState(() => _listenedText = displayText);
       },
       listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 5),
+      pauseFor: const Duration(seconds: 8),
       localeId: locale,
-      listenOptions: SpeechListenOptions(partialResults: true),
+      partialResults: true,
     );
   }
 
@@ -1128,15 +1128,17 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
                   ),
                 ),
 
-                const Spacer(),
-
-                // ── Centre content area ─────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: _buildCentreContent(),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Align(
+                      alignment: _state == _LiveCallState.recording
+                          ? const Alignment(0, 0.7)
+                          : Alignment.center,
+                      child: _buildCentreContent(),
+                    ),
+                  ),
                 ),
-
-                const Spacer(),
 
                 // ── Bottom controls ─────────────────────────────────────
                 Padding(
@@ -1174,16 +1176,13 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         );
 
       case _LiveCallState.recording:
-        return const Align(
-          alignment: Alignment(0, 0.7),
-          child: Text(
-            'Recording…',
-            style: TextStyle(
-              color: Colors.redAccent,
-              fontSize: 18,
-            ),
-            textAlign: TextAlign.center,
+        return const Text(
+          'Recording…',
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontSize: 18,
           ),
+          textAlign: TextAlign.center,
         );
 
       case _LiveCallState.processing:
