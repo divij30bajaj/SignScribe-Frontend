@@ -10,7 +10,6 @@ import 'package:http_parser/http_parser.dart';
 import 'package:camera/camera.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 // ── Global camera list (initialised in main) ──────────────────────────────────
@@ -95,44 +94,44 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,  // ← was 'start'
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Text(
-                  'SignScribe',
-                  style: Theme.of(context).textTheme.headlineLarge,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                ClipOval(
-                  child: SizedBox(
-                    width: 180,
-                    height: 180,
-                    child: _controller.value.isInitialized
-                        ? AspectRatio(
-                      aspectRatio: _controller.value.aspectRatio,
-                      child: VideoPlayer(_controller),
-                    )
-                        : Container(
-                      color: Theme.of(context).colorScheme.surfaceVariant,
-                      child: const Center(child: CircularProgressIndicator()),
-                    ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,  // ← was 'start'
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                'SignScribe',
+                style: Theme.of(context).textTheme.headlineLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ClipOval(
+                child: SizedBox(
+                  width: 180,
+                  height: 180,
+                  child: _controller.value.isInitialized
+                      ? AspectRatio(
+                    aspectRatio: _controller.value.aspectRatio,
+                    child: VideoPlayer(_controller),
+                  )
+                      : Container(
+                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    child: const Center(child: CircularProgressIndicator()),
                   ),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'Your personal interpreter',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Your personal interpreter',
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
+      ),
     );
   }
 }
@@ -1012,22 +1011,15 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── STT ───────────────────────────────────────────────────────────────────
 
   Future<void> _startListening() async {
+    // Show _sttAvailable value visibly on screen
     if (!_sttAvailable) {
-      setState(() => _error = 'STT not available');
-      return;
-    }
-
-    // Request permissions explicitly before listening
-    final micPermission = await Permission.microphone.request();
-
-    if (!micPermission.isGranted) {
-      setState(() => _error = 'Mic permission: $micPermission');
+      setState(() => _error = 'STT not available. Available: $_sttAvailable');
       return;
     }
 
     setState(() {
       _state = _LiveCallState.listening;
-      _listenedText = 'Listening...';
+      _listenedText = 'Waiting for speech...'; // ← visible confirmation listen started
       _error = null;
     });
 
@@ -1041,6 +1033,11 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
       pauseFor: const Duration(seconds: 5),
       partialResults: true,
     );
+
+    // This runs after listen completes
+    if (mounted) setState(() => _listenedText = (_listenedText == 'Waiting for speech...')
+        ? 'Listen ended with no results'
+        : _listenedText);
   }
 
   Future<void> _stopListening() async {
