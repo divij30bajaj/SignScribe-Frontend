@@ -1011,33 +1011,41 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   // ── STT ───────────────────────────────────────────────────────────────────
 
   Future<void> _startListening() async {
-    // Show _sttAvailable value visibly on screen
     if (!_sttAvailable) {
-      setState(() => _error = 'STT not available. Available: $_sttAvailable');
+      setState(() => _error = 'Speech recognition not available');
       return;
     }
-
     setState(() {
       _state = _LiveCallState.listening;
-      _listenedText = 'Waiting for speech...'; // ← visible confirmation listen started
-      _error = null;
+      _listenedText = null;
     });
+
+    const sttLocaleMap = {
+      'Hindi': 'hi-IN', 'Tamil': 'ta-IN', 'Telugu': 'te-IN',
+      'Kannada': 'kn-IN', 'Bengali': 'bn-IN', 'Marathi': 'mr-IN',
+      'Gujarati': 'gu-IN',
+    };
+
+    // STT listens in call language
+    final locale = sttLocaleMap[_callLanguage] ?? 'en-US';
 
     await _stt.listen(
       onResult: (result) {
-        if (mounted) setState(() => _listenedText = result.recognizedWords.isEmpty
-            ? 'No words yet...'
-            : result.recognizedWords);
+        // Keep synchronous — no async here
+        if (mounted) setState(() => _listenedText = result.recognizedWords);
+
+        // Translate only on final result, fire and forget
+        if (result.finalResult && _listenTranslator != null && _callLanguage != _appLanguage) {
+          _listenTranslator!.translateText(result.recognizedWords).then((translated) {
+            if (mounted) setState(() => _listenedText = translated);
+          });
+        }
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 5),
+      localeId: locale,
       partialResults: true,
     );
-
-    // This runs after listen completes
-    if (mounted) setState(() => _listenedText = (_listenedText == 'Waiting for speech...')
-        ? 'Listen ended with no results'
-        : _listenedText);
   }
 
   Future<void> _stopListening() async {
