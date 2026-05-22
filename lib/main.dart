@@ -174,6 +174,7 @@ class _LanguageSetupScreenState extends State<LanguageSetupScreen> {
     setState(() => _saving = true);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', _selectedLanguage);
+    await prefs.setString('play_aloud', 'Always');
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
@@ -394,10 +395,15 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.menu),
-            onSelected: (_) {},
+            onSelected: (value) {
+              if (value == 'settings') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              }
+            },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'settings', child: Text('Settings')),
-              PopupMenuItem(value: 'about', child: Text('About')),
+              PopupMenuItem(value: 'settings', child: Text('Settings'))
             ],
           ),
         ],
@@ -466,6 +472,208 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Settings screen ───────────────────────────────────────────────────────────
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  String _language = 'English';
+  String _playAloud = 'Always';
+  bool _loading = true;
+
+  final List<String> _languages = [
+    'English', 'Hindi'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _language  = prefs.getString('language')   ?? 'English';
+      _playAloud = prefs.getString('play_aloud') ?? 'Always';
+      _loading   = false;
+    });
+  }
+
+  Future<void> _saveLanguage(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('language', value);
+    setState(() => _language = value);
+  }
+
+  Future<void> _savePlayAloud(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('play_aloud', value);
+    setState(() => _playAloud = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: const Text('Settings'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+        children: [
+          const SizedBox(height: 32),
+
+          // ── Profile section ───────────────────────────────────────
+          Center(
+            child: Column(
+              children: [
+                // Default silhouette avatar
+                CircleAvatar(
+                  radius: 48,
+                  backgroundColor: cs.surfaceVariant,
+                  child: Icon(
+                    Icons.person,
+                    size: 56,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Guest',
+                  style: tt.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 32),
+          const Divider(),
+
+          // ── Row 1: Language ───────────────────────────────────────
+          ListTile(
+            title: const Text('Your chosen language'),
+            trailing: GestureDetector(
+              onTap: () => _showLanguagePicker(context),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _language,
+                    style: TextStyle(
+                      color: cs.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, color: cs.primary),
+                ],
+              ),
+            ),
+          ),
+
+          const Divider(),
+
+          // ── Row 2: Play Aloud ─────────────────────────────────────
+          ListTile(
+            title: const Text('Play aloud'),
+            trailing: GestureDetector(
+              onTap: () => _showPlayAloudPicker(context),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _playAloud,
+                    style: TextStyle(
+                      color: cs.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right, color: cs.primary),
+                ],
+              ),
+            ),
+          ),
+
+          const Divider(),
+        ],
+      ),
+    );
+  }
+
+  void _showLanguagePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          const Text('Choose language',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+          const SizedBox(height: 8),
+          ..._languages.map((lang) => ListTile(
+            title: Text(lang),
+            trailing: _language == lang
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () {
+              _saveLanguage(lang);
+              Navigator.of(context).pop();
+            },
+          )),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  void _showPlayAloudPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          const Text('Play aloud',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+          const SizedBox(height: 8),
+          ...['Always', 'Ask'].map((option) => ListTile(
+            title: Text(option),
+            subtitle: Text(option == 'Always'
+                ? 'Automatically speaks after sign translation'
+                : 'Shows a button to play when ready'),
+            trailing: _playAloud == option
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () {
+              _savePlayAloud(option);
+              Navigator.of(context).pop();
+            },
+          )),
+          const SizedBox(height: 12),
         ],
       ),
     );
@@ -590,6 +798,7 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   bool _camReady = false;
   late String _callLanguage;
   OnDeviceTranslator? _translator;
+  String _playAloudPreference = 'Always';
 
   // ── State machine ─────────────────────────────────────────────────────────
   _LiveCallState _state = _LiveCallState.idle;
@@ -621,6 +830,7 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   Future<void> _loadLanguage() async {
     final prefs = await SharedPreferences.getInstance();
     final language = prefs.getString('language') ?? 'English';
+    final playAloud = prefs.getString('play_aloud') ?? 'Always';
     if (mounted) setState(() => _callLanguage = language);
 
     // Only create translator if not English
@@ -739,6 +949,25 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         _translation = displayResult;
         _state = _LiveCallState.result;
       });
+
+      final prefs = await SharedPreferences.getInstance();
+      final playAloud = prefs.getString('play_aloud') ?? 'Always';
+
+      if (playAloud == 'Always') {
+        const ttsLocaleMap = {
+          'Hindi': 'hi-IN',
+          'Tamil': 'ta-IN',
+          'Telugu': 'te-IN',
+          'Kannada': 'kn-IN',
+          'Bengali': 'bn-IN',
+          'Marathi': 'mr-IN',
+          'Gujarati': 'gu-IN',
+        };
+        final locale = ttsLocaleMap[_callLanguage] ?? 'en-US';
+        await _tts.setLanguage(locale);
+        await _tts.speak(displayResult);
+      }
+
     } catch (e) {
       setState(() {
         _error = 'Error: $e';
@@ -850,9 +1079,29 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         children: [
           // ── Translucent camera preview ────────────────────────────────
           if (_camReady)
-            Opacity(
-              opacity: 0.15,   // almost black, slightly visible like FaceTime
-              child: CameraPreview(_cam),
+            _state == _LiveCallState.recording
+                ? SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,        // fills screen, crops edges like a real camera app
+                child: SizedBox(
+                  width: _cam.value.previewSize!.height,
+                  height: _cam.value.previewSize!.width,
+                  child: CameraPreview(_cam),
+                ),
+              ),
+            )
+                : Opacity(
+              opacity: 0.15,
+              child: SizedBox.expand(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _cam.value.previewSize!.height,
+                    height: _cam.value.previewSize!.width,
+                    child: CameraPreview(_cam),
+                  ),
+                ),
+              ),
             ),
 
           // ── Main content overlay ──────────────────────────────────────
@@ -951,7 +1200,6 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Translation card
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -961,22 +1209,27 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
               ),
               child: Column(
                 children: [
-                  const Text('\u201C',
-                      style: TextStyle(color: Colors.white38, fontSize: 40)),
                   Text(
                     _translation ?? '',
                     style: const TextStyle(
                         color: Colors.white, fontSize: 20, height: 1.4),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 8),
-                  const Text('Interpreted Sign Language',
-                      style: TextStyle(color: Colors.white38, fontSize: 12)),
+
+                  // Show Play Aloud only when preference is Ask
+                  if (_playAloudPreference == 'Ask') ...[
+                    const SizedBox(height: 16),
+                    _TextButton(
+                      onTap: _playAloud,
+                      label: 'Play Aloud',
+                      color: Colors.white24,
+                      textColor: Colors.white,
+                    ),
+                  ],
                 ],
               ),
             ),
 
-            // Listened text (if any)
             if (_listenedText != null && _listenedText!.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
@@ -988,9 +1241,6 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
                 ),
                 child: Column(
                   children: [
-                    const Text('They said:',
-                        style:
-                        TextStyle(color: Colors.white38, fontSize: 12)),
                     const SizedBox(height: 6),
                     Text(
                       _listenedText!,
@@ -1135,19 +1385,12 @@ class ResultCard extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('\u201C',
-                style: tt.displayLarge
-                    ?.copyWith(color: cs.primary.withOpacity(0.4))),
             Text(
               text,
               style: tt.titleLarge?.copyWith(
                   fontWeight: FontWeight.w500, height: 1.4),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 4),
-            Text('Interpreted Sign Language',
-                style: tt.labelMedium
-                    ?.copyWith(color: cs.primary.withOpacity(0.7))),
             const SizedBox(height: 16),
             ElevatedButton.icon(
               onPressed: ttsReady ? onPlay : null,
