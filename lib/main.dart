@@ -1034,13 +1034,14 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         final spokenText = result.recognizedWords;
         if (spokenText.isEmpty) return;
 
-        // Translate to app language if different from call language
-        String displayText = spokenText;
-        if (_listenTranslator != null && _callLanguage != _appLanguage) {
-          displayText = await _listenTranslator!.translateText(spokenText);
-        }
+        // Always show raw STT text immediately for real-time feedback
+        if (mounted) setState(() => _listenedText = spokenText);
 
-        if (mounted) setState(() => _listenedText = displayText);
+        // Only translate on final result to avoid flooding ML Kit
+        if (result.finalResult && _listenTranslator != null && _callLanguage != _appLanguage) {
+          final translated = await _listenTranslator!.translateText(spokenText);
+          if (mounted) setState(() => _listenedText = translated);
+        }
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 8),
