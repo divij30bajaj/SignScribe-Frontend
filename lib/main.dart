@@ -154,7 +154,7 @@ class _LanguageSetupScreenState extends State<LanguageSetupScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.asset('assets/welcome_video.mp4')
+    _controller = VideoPlayerController.asset('assets/language_screen.mp4')
       ..initialize().then((_) {
         if (mounted) {
           setState(() {});
@@ -393,18 +393,13 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         title: const Text('SignScribe'),
         actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.menu),
-            onSelected: (value) {
-              if (value == 'settings') {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              }
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'settings', child: Text('Settings'))
-            ],
           ),
         ],
       ),
@@ -455,17 +450,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isUploading ? null : _pickVideo,
-                      child: Text(
-                          _isUploading ? 'Uploading…' : 'Upload Video'),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
                       onPressed: _isUploading ? null : _openCamera,
-                      child: const Text('Start Live Call'),
+                      child: const Text('Start Call'),
                     ),
                   ),
                 ],
@@ -797,8 +783,10 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   late CameraController _cam;
   bool _camReady = false;
   late String _callLanguage;
-  OnDeviceTranslator? _translator;
+  OnDeviceTranslator? _callTranslator;
+  OnDeviceTranslator? _listenTranslator;
   String _playAloudPreference = 'Always';
+  String _appLanguage = 'English';
 
   // ── State machine ─────────────────────────────────────────────────────────
   _LiveCallState _state = _LiveCallState.idle;
@@ -823,68 +811,69 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
     _initCamera();
     _initTts();
     _initStt();
-    _loadLanguage();
-    _initCallTranslator();               // ← replaces _loadLanguage()
+    _initLanguages();
+  }
+
+  Future<void> _initLanguages() async {
+    await _loadLanguage();       // sets _appLanguage first
+    await _initCallTranslator(); // then uses _appLanguage
   }
 
   Future<void> _loadLanguage() async {
     final prefs = await SharedPreferences.getInstance();
-    final language = prefs.getString('language') ?? 'English';
+    final appLanguage = prefs.getString('language') ?? 'English';
     final playAloud = prefs.getString('play_aloud') ?? 'Always';
-    if (mounted) setState(() => _callLanguage = language);
-
-    // Only create translator if not English
-    if (language != 'English') {
-      const mlKitLanguageMap = {
-        'Hindi':     TranslateLanguage.hindi,
-        'Tamil':     TranslateLanguage.tamil,
-        'Telugu':    TranslateLanguage.telugu,
-        'Kannada':   TranslateLanguage.kannada,
-        'Bengali':   TranslateLanguage.bengali,
-        'Marathi':   TranslateLanguage.marathi,
-        'Gujarati':  TranslateLanguage.gujarati,
-      };
-
-      final targetLanguage = mlKitLanguageMap[language];
-      if (targetLanguage != null) {
-        _translator = OnDeviceTranslator(
-          sourceLanguage: TranslateLanguage.english,
-          targetLanguage: targetLanguage,
-        );
-
-        // Download model in background if not already present
-        final modelManager = OnDeviceTranslatorModelManager();
-        final downloaded = await modelManager.isModelDownloaded(targetLanguage.bcpCode);
-        if (!downloaded) {
-          await modelManager.downloadModel(targetLanguage.bcpCode);
-        }
-      }
+    if (mounted) {
+      setState(() {
+        // _callLanguage stays as widget.callLanguage — DO NOT overwrite it
+        _appLanguage = appLanguage;
+        _playAloudPreference = playAloud;
+      });
     }
   }
 
   Future<void> _initCallTranslator() async {
     const mlKitLanguageMap = {
-      'Hindi':     TranslateLanguage.hindi,
-      'Tamil':     TranslateLanguage.tamil,
-      'Telugu':    TranslateLanguage.telugu,
-      'Kannada':   TranslateLanguage.kannada,
-      'Bengali':   TranslateLanguage.bengali,
-      'Marathi':   TranslateLanguage.marathi,
-      'Gujarati':  TranslateLanguage.gujarati,
+      'Hindi':    TranslateLanguage.hindi,
+      'Tamil':    TranslateLanguage.tamil,
+      'Telugu':   TranslateLanguage.telugu,
+      'Kannada':  TranslateLanguage.kannada,
+      'Bengali':  TranslateLanguage.bengali,
+      'Marathi':  TranslateLanguage.marathi,
+      'Gujarati': TranslateLanguage.gujarati,
     };
 
-    final targetLanguage = mlKitLanguageMap[_callLanguage];
-    if (targetLanguage != null) {
-      _translator = OnDeviceTranslator(
+    final modelManager = OnDeviceTranslatorModelManager();
+
+    // ── Translator 1: English → call language (sign → sentence) ──────────
+    final callTarget = mlKitLanguageMap[_callLanguage];
+    if (callTarget != null) {
+      _callTranslator = OnDeviceTranslator(
         sourceLanguage: TranslateLanguage.english,
-        targetLanguage: targetLanguage,
+        targetLanguage: callTarget,
       );
-      final modelManager = OnDeviceTranslatorModelManager();
-      final downloaded = await modelManager.isModelDownloaded(
-          targetLanguage.bcpCode);
-      if (!downloaded) {
-        await modelManager.downloadModel(targetLanguage.bcpCode);
-      }
+      final downloaded = await modelManager.isModelDownloaded(callTarget.bcpCode);
+      if (!downloaded) await modelManager.downloadModel(callTarget.bcpCode);
+    }
+
+    // ── Translator 2: call language → app language (speech → text) ───────
+    // Only needed if call language != app language and app language != English
+    final appTarget = mlKitLanguageMap[_appLanguage];
+    final callSource = mlKitLanguageMap[_callLanguage];
+
+    if (callSource != null && appTarget != null && _callLanguage != _appLanguage) {
+      _listenTranslator = OnDeviceTranslator(
+        sourceLanguage: callSource,
+        targetLanguage: appTarget,
+      );
+      final downloaded = await modelManager.isModelDownloaded(appTarget.bcpCode);
+      if (!downloaded) await modelManager.downloadModel(appTarget.bcpCode);
+    } else if (_callLanguage != 'English' && _appLanguage == 'English' && callSource != null) {
+      // call language → English
+      _listenTranslator = OnDeviceTranslator(
+        sourceLanguage: callSource,
+        targetLanguage: TranslateLanguage.english,
+      );
     }
   }
 
@@ -941,9 +930,13 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
 
       // Translate if call language is not English
       String displayResult = englishResult;
-      if (_translator != null) {
-        displayResult = await _translator!.translateText(englishResult);
+      if (_callTranslator != null) {
+        displayResult = await _callTranslator!.translateText(englishResult);
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      final playAloud = prefs.getString('play_aloud') ?? 'Always';
+      if (mounted) setState(() => _playAloudPreference = playAloud);
 
       setState(() {
         _translation = displayResult;
@@ -1031,22 +1024,26 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
     });
 
     const sttLocaleMap = {
-      'Hindi':     'hi-IN',
-      'Tamil':     'ta-IN',
-      'Telugu':    'te-IN',
-      'Kannada':   'kn-IN',
-      'Malayalam': 'ml-IN',
-      'Bengali':   'bn-IN',
-      'Marathi':   'mr-IN',
-      'Gujarati':  'gu-IN',
-      'Punjabi':   'pa-IN',
+      'Hindi': 'hi-IN', 'Tamil': 'ta-IN', 'Telugu': 'te-IN',
+      'Kannada': 'kn-IN', 'Bengali': 'bn-IN', 'Marathi': 'mr-IN',
+      'Gujarati': 'gu-IN',
     };
 
+    // STT listens in call language
     final locale = sttLocaleMap[_callLanguage] ?? 'en-US';
 
     await _stt.listen(
-      onResult: (result) {
-        if (mounted) setState(() => _listenedText = result.recognizedWords);
+      onResult: (result) async {
+        final spokenText = result.recognizedWords;
+        if (spokenText.isEmpty) return;
+
+        // Translate to app language if different from call language
+        String displayText = spokenText;
+        if (_listenTranslator != null && _callLanguage != _appLanguage) {
+          displayText = await _listenTranslator!.translateText(spokenText);
+        }
+
+        if (mounted) setState(() => _listenedText = displayText);
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 5),
@@ -1062,7 +1059,8 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
   @override
   void dispose() {
     _cam.dispose();
-    _translator?.close();
+    _callTranslator?.close();
+    _listenTranslator?.close();
     _tts.stop();
     _stt.stop();
     super.dispose();
@@ -1182,7 +1180,7 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         return const Text(
           'Recording…',
           style: TextStyle(color: Colors.redAccent, fontSize: 18),
-          textAlign: TextAlign.center,
+          textAlign: TextAlign.bottom,
         );
 
       case _LiveCallState.processing:
@@ -1200,38 +1198,40 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    _translation ?? '',
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 20, height: 1.4),
-                    textAlign: TextAlign.center,
-                  ),
-
-                  // Show Play Aloud only when preference is Ask
-                  if (_playAloudPreference == 'Ask') ...[
-                    const SizedBox(height: 16),
-                    _TextButton(
-                      onTap: _playAloud,
-                      label: 'Play Aloud',
-                      color: Colors.white24,
-                      textColor: Colors.white,
+            // ── Only show translation box if there is a translation ──────
+            if (_translation != null && _translation!.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      _translation!,
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 20, height: 1.4),
+                      textAlign: TextAlign.center,
                     ),
+                    if (_playAloudPreference == 'Ask') ...[
+                      const SizedBox(height: 16),
+                      _TextButton(
+                        onTap: _playAloud,
+                        label: 'Play Aloud',
+                        color: Colors.white24,
+                        textColor: Colors.white,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-
-            if (_listenedText != null && _listenedText!.isNotEmpty) ...[
               const SizedBox(height: 16),
+            ],
+
+            // ── Listened text ─────────────────────────────────────────────
+            if (_listenedText != null && _listenedText!.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -1239,19 +1239,21 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: Colors.white12),
                 ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 6),
-                    Text(
-                      _listenedText!,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
+                child: Text(
+                  _listenedText!,
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
+                  textAlign: TextAlign.center,
                 ),
               ),
-            ],
+
+            // ── Placeholder when nothing to show yet ──────────────────────
+            if ((_translation == null || _translation!.isEmpty) &&
+                (_listenedText == null || _listenedText!.isEmpty))
+              const Text(
+                'Start signing or listen to the other person',
+                style: TextStyle(color: Colors.white70, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
           ],
         );
 
