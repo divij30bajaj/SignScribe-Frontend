@@ -1174,10 +1174,16 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         );
 
       case _LiveCallState.recording:
-        return const Text(
-          'Recording…',
-          style: TextStyle(color: Colors.redAccent, fontSize: 18),
-          textAlign: TextAlign.bottom,
+        return const Align(
+          alignment: Alignment(0, 0.7),
+          child: Text(
+            'Recording…',
+            style: TextStyle(
+              color: Colors.redAccent,
+              fontSize: 18,
+            ),
+            textAlign: TextAlign.center,
+          ),
         );
 
       case _LiveCallState.processing:
