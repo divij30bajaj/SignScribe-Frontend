@@ -857,19 +857,33 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
     }
 
     // ── Translator 2: call language → app language (speech → text) ───────
-    // Only needed if call language != app language and app language != English
     final appTarget = mlKitLanguageMap[_appLanguage];
     final callSource = mlKitLanguageMap[_callLanguage];
 
-    if (callSource != null && appTarget != null && _callLanguage != _appLanguage) {
+    if (_callLanguage == _appLanguage) {
+      // Same language — no translation needed
+      _listenTranslator = null;
+
+    } else if (_callLanguage == 'English' && appTarget != null) {
+      // ← THIS WAS MISSING: English speech → Indian app language
+      _listenTranslator = OnDeviceTranslator(
+        sourceLanguage: TranslateLanguage.english,
+        targetLanguage: appTarget,
+      );
+      final downloaded = await modelManager.isModelDownloaded(appTarget.bcpCode);
+      if (!downloaded) await modelManager.downloadModel(appTarget.bcpCode);
+
+    } else if (callSource != null && appTarget != null) {
+      // Indian call language → Indian app language
       _listenTranslator = OnDeviceTranslator(
         sourceLanguage: callSource,
         targetLanguage: appTarget,
       );
       final downloaded = await modelManager.isModelDownloaded(appTarget.bcpCode);
       if (!downloaded) await modelManager.downloadModel(appTarget.bcpCode);
-    } else if (_callLanguage != 'English' && _appLanguage == 'English' && callSource != null) {
-      // call language → English
+
+    } else if (callSource != null && _appLanguage == 'English') {
+      // Indian call language → English
       _listenTranslator = OnDeviceTranslator(
         sourceLanguage: callSource,
         targetLanguage: TranslateLanguage.english,
