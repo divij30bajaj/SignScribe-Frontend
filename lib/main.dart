@@ -943,9 +943,6 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
         _state = _LiveCallState.result;
       });
 
-      final prefs = await SharedPreferences.getInstance();
-      final playAloud = prefs.getString('play_aloud') ?? 'Always';
-
       if (playAloud == 'Always') {
         const ttsLocaleMap = {
           'Hindi': 'hi-IN',
