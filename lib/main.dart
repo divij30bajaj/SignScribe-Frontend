@@ -1026,24 +1026,15 @@ class _LiveCallScreenState extends State<LiveCallScreen> {
       'Gujarati': 'gu-IN',
     };
 
-    // STT listens in call language
     final locale = sttLocaleMap[_callLanguage] ?? 'en-US';
 
     await _stt.listen(
       onResult: (result) {
-        // Keep synchronous — no async here
         if (mounted) setState(() => _listenedText = result.recognizedWords);
-
-        // Translate only on final result, fire and forget
-        if (result.finalResult && _listenTranslator != null && _callLanguage != _appLanguage) {
-          _listenTranslator!.translateText(result.recognizedWords).then((translated) {
-            if (mounted) setState(() => _listenedText = translated);
-          });
-        }
       },
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 5),
-      localeId: locale,
+      // localeId: locale,
       partialResults: true,
     );
   }
